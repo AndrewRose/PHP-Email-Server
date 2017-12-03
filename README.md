@@ -1,4 +1,4 @@
-PES - Personal EMail Services
+PES - PHP Email Server
 =======
 
 Test environment/Requirements: PHP 7.x.x, Linux, MySQL or MariaDB
