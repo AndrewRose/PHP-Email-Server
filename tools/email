@@ -1,0 +1,91 @@
+#!/usr/bin/php
+<?php
+/*
+usage: ./email -c <cmd> -e <emailaddress> [-l <link email address>] [-p <password>] [-n <name>] [-r]
+
+This tool is used to create new email accounts.  Examples:
+
+Create a new account:
+ ./email -c add -e user@test.com -p password -n Andrew Rose
+
+Add a new email address linking to the previous account:
+ ./email -c add -e user@anotherdomain.com -l andrew@test.com
+
+Remove the linked address:
+ ./email -c del -e user@anotherdomain.com
+
+*/
+
+define('DEBUG', TRUE);
+define('INICONF', '../conf/imapd.ini');
+
+mb_internal_encoding('ascii');
+
+function __autoload($class)
+{
+	$file = '../'.str_replace('\\', '/', $class).'.php';
+	if(file_exists($file))
+	{
+		include_once($file);
+	}
+	else
+	{
+		throw new \Pes\Exception(1, $file);
+	}
+}
+
+$settings = parse_ini_file(INICONF, TRUE);
+$backendClass = "\\Pes\\Imap\\Backend\\".$settings['backend']['driver'];
+$backend = new $backendClass($settings['backend']);
+
+$opts = getopt('c:e:l:p:n:r:');
+
+if(!isset($opts['c']))
+{
+	echo "No command specified\n";
+	return FALSE;
+}
+
+if(isset($opts['e']) && !filter_var($opts['e'], FILTER_VALIDATE_EMAIL))
+{
+	echo 'Invalid email address: '.$opts['e']."\n";
+	return FALSE;
+}
+
+if(isset($opts['l']) && !filter_var($opts['l'], FILTER_VALIDATE_EMAIL))
+{
+	echo 'Invalid link email address: '.$opts['l']."\n";
+	return FALSE;
+}
+
+if(!isset($opts['n']))
+{
+	$opts['n'] = '';
+}
+
+switch($opts['c'])
+{
+	case 'add':
+	{
+		if(!isset($opts['l']) && isset($opts['e']) && isset($opts['p'])) // add new account
+		{
+			$backend->_begin();
+			if($backend->_addUserEmail($opts['e'], FALSE, $opts['p'], $opts['n']))
+			{
+				$backend->_commit();
+				return TRUE;
+			}
+			return FALSE;
+		}
+		else if(isset($opts['l']) && isset($opts['e'])) // link email address to existing account
+		{
+			$backend->_addUserEmail($opts['e'], $opts['l'], FALSE, FALSE);
+		}
+	}
+	break;
+	default:
+	{
+
+	}
+	break;
+}
