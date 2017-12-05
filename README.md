@@ -1,6 +1,8 @@
 PES - PHP Email Server
 =======
 
+***I started this project over 4 years ago, had kids and forgot about it, just came back to it and deleted it from github so I could nename it from PES to PHP-Email-Server so it was a bit more obvious what it is.  The SMTP server is pretty much there and I'm working to bring the IMAP server up to spec using a TTD approach.***
+
 Test environment/Requirements: PHP 7.x.x, Linux, MySQL or MariaDB
 
 This package is currently still in development but is working to a degree.
