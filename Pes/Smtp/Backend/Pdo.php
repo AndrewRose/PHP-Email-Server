@@ -10,10 +10,12 @@ class Pdo implements \Pes\Smtp\Interfaces\Backend
 	private $settings = array();
 	private $db = FALSE;
 	private $dbMaxPacketSize = 0;
+	public $log;
 
 	public function __construct($settings, $handler)
 	{
 		$this->handler = $handler;
+		$this->handler->log->write('Backend Pdo started');
 		// PHP hostname lookups can take a substantial amount of time to timeout so use this->ping instead.
 		if(!$this->ping($settings['hostname']))
 		{
@@ -22,7 +24,7 @@ class Pdo implements \Pes\Smtp\Interfaces\Backend
 
 		$this->settings = $settings;
 		//$this->db = new \PDO('mysql:host='.$settings['hostname'].';dbname='.$settings['database'], $settings['username'], $settings['password']);
-		$this->db = new \PDO('mysql:dbname='.$settings['database'], $settings['username'], $settings['password']);
+		$this->db = new \PDO('mysql:dbname='.$settings['database'], $settings['username'], $settings['password'], [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
 		$this->db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 
 		/*
@@ -45,6 +47,19 @@ class Pdo implements \Pes\Smtp\Interfaces\Backend
 			echo "MySQL max_allowed_packet is smaller than maxMailSize! Increase max_allowed_packet to maxMailSize+10% to make me happy :)";
 			exit();
 		}
+
+		// Keep the DB connection alive by sending it a query every {keepalive} seconds..
+		// We do it this way as unable to catch connect timeouts as an exception as you might have seen below...
+		// no idea why we can't get a straight exception when a query fails .. and for why it failed :/
+		$db = $this->db;
+		$keepaliveEventTimer = \Event::timer($handler->base, function($keepalive) use (&$keepaliveEventTimer, $handler, $db) {
+			$db->query('select 1');
+			$handler->log->write('Ping DB', 3);
+			$keepaliveEventTimer->add($keepalive);
+		}, $settings['keepalive']);
+		$keepaliveEventTimer->addTimer($settings['keepalive']);
+
+		return TRUE;
 	}
 
 	public function queueMail($from, $to, $body)
@@ -61,6 +76,8 @@ class Pdo implements \Pes\Smtp\Interfaces\Backend
 			throw new \Pes\Smtp\Exception(552);
 		}
 
+try
+{
 		$stmt = $this->db->prepare($query);
 		if($stmt->execute([':localPart' => $tmp[0], ':domain' => $tmp[1]]))
 		{
@@ -119,6 +136,12 @@ class Pdo implements \Pes\Smtp\Interfaces\Backend
 			return TRUE;
 
 		}
+} catch(PDOException $e) {
+$this->handler->log->write('Reconnecting PDO');
+sleep(0.1);
+$this->db = new \PDO('mysql:dbname='.$this->settings['database'], $this->settings['username'], $this->settings['password'], [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+$this->queueMail($from, $to, $body);
+}
 
 		return FALSE;
 	}

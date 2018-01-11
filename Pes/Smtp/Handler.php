@@ -4,6 +4,7 @@ namespace Pes\Smtp;
 
 class Handler
 {
+	public $base = FALSE;
 	public $domainName = FALSE;
 	public $maxMailSize = 0;
 	public $connections = [];
@@ -18,7 +19,6 @@ class Handler
 		$this->domainName = $settings['domain'];
 		$this->maxMailSize = $settings['maxMailSize'];
 		$backendClass = "\\Pes\\Smtp\\Backend\\".$this->settings['backend']['driver'];
-		$this->backend = new $backendClass($this->settings['backend'], $this);
 
 		$this->log = new \Pes\Log($settings['log']['file'],$settings['log']['level']);
 		$this->log->write('Smtpd started');
@@ -36,6 +36,9 @@ class Handler
 		{
 			exit("Couldn't open event base\n");
 		}
+
+		$this->backend = new $backendClass($this->settings['backend'], $this);
+
 
 		\Event::signal($this->base, SIGTERM, [$this, 'sigHandler']);
 		\Event::signal($this->base, SIGHUP, [$this, 'sigHandler']);
@@ -121,6 +124,7 @@ class Handler
 
 	function ev_lerror($listener, $ctx)
 	{
+$this->log->write('ev_lerror():',3);
 	}
 
 	public function ev_close($id)
@@ -185,6 +189,7 @@ class Handler
 				while(strpos($this->connections[$id]['clientData'], "\r\n")) // Keep processing commands until we hit DATA and go into dataMode
 				{
 					list($line, $this->connections[$id]['clientData']) = explode("\r\n", $this->connections[$id]['clientData'], 2);
+
 					$this->cmd($buffer, $id, $line);
 					if($this->connections[$id]['dataMode'])
 					{
@@ -192,7 +197,7 @@ class Handler
 					}
 				}
 			}
-			else if($this->connections[$id]['dataMode'] && ($dataPos = strpos($this->connections[$id]['clientData'], "\r\n.\r\n")))
+			else if($this->connections[$id]['dataMode'] && (strpos($this->connections[$id]['clientData'], "\r\n.\r\n") !== FALSE))
 			{
 				list($data, $this->connections[$id]['clientData']) = explode("\r\n.\r\n", $this->connections[$id]['clientData'], 2);
 
@@ -214,6 +219,7 @@ class Handler
 				}
 
 				//$this->connections[$id]['clientData'] = ''; Keep the buffer as the client could be seding another email!
+//TODO we could still get commands i.e. QUIT.. shuld this claering up be done in ev_close?
 				$this->connections[$id]['dataMode'] = FALSE;
 				$this->connections[$id]['message'] = [
 					'MAIL FROM' => FALSE,
@@ -222,6 +228,11 @@ class Handler
 				];
 
 				$this->ev_write($id, "250 2.0.0 OK.\r\n");
+			}
+	
+			if(!isset($buffer->input) || !$buffer->input->length)
+			{
+				return;
 			}
 		}
 	}
