@@ -10,18 +10,16 @@ class Handler
 	public $settings = [];
 	private $backend = FALSE;
 	private $lib;
-	private $log;
+	public $log;
 
 	private $listener;
-	private $base;
+	public $base;
 	private $ctx;
 
 	public function __construct($settings)
 	{
 		$this->settings = $settings; 
 		$backendClass = "\\Pes\\Imap\\Backend\\".$this->settings['backend']['driver'];
-		$this->backend = new $backendClass($this->settings['backend']);
-		$this->backend->handler = $this;
 		$this->lib = new \Pes\Imap\Lib;
 
 		$this->log = new \Pes\Log($settings['log']['file'],$settings['log']['level']);
@@ -41,6 +39,9 @@ class Handler
 			$this->log->write('Failed to create EventBase');
 			exit("Couldn't open event base\n");
 		}
+
+		$this->backend = new $backendClass($this->settings['backend'], $this);
+//		$this->backend->handler = $this;
 
 		$socket = stream_socket_server('tcp://0.0.0.0:143', $errno, $errstr);
 		stream_set_blocking($socket, 0);
@@ -140,15 +141,20 @@ class Handler
 
 	protected function ev_write($id, $string)
 	{
-		$this->log->write('Server: '.substr($string, 0, 70), 3);
+		$this->log->write('Server: '.substr($string, 0, 128), 3);
+		//$this->log->write('Server: '.$string, 3);
 
-		if($this->connections[$id]['cnxSsl'])
-		{
-			$this->connections[$id]['cnxSsl']->write($string);
-		}
-		else
-		{
-			$this->connections[$id]['cnx']->write($string);
+		try {
+			if($this->connections[$id]['cnxSsl'])
+			{
+				$this->connections[$id]['cnxSsl']->write($string);
+			}
+			else
+			{
+				$this->connections[$id]['cnx']->write($string);
+			}
+		} catch (Exception $e) {
+			$this->log->write('ev_write('.$id.'): Failed to write to client! '.$e->getMessage(),3);
 		}
 	}
 
@@ -187,6 +193,7 @@ class Handler
 					$this->connections[$id]['fetchLiteralCount'] = FALSE;
 					$res = $this->connections[$id]['fetchLiteralResume'];
 					$this->cmd($buffer, $id, $res[0], $res[1], $res[2], $this->connections[$id]['fetchLiteralResult']);
+$this->connections[$id]['fetchLiteralResult'] = '';
 				}
 			}
 			else
@@ -237,6 +244,7 @@ class Handler
 			// check to see if the command is UID prefixed and set the cmd and cmdParams repsectivly.  Also set uidMode = TRUE.
 			if(strtoupper($parts[1]) == 'UID')
 			{
+				$this->log->write('UID mode enabled', 3);
 				$parts = explode(' ', $parts[2], 2); // Grab the command and params.
 				$cmd = strtoupper(trim($parts[0]));
 				$paramString = $parts[1];
@@ -491,7 +499,9 @@ class Handler
 
 			case 'FETCH':
 			{
+//echo "FETCH: ".$paramString."\n";
 				$fetch = $this->lib->parseFetch($paramString);
+//print_r($fetch);
 
 				if(!$fetch)
 				{
@@ -513,6 +523,7 @@ class Handler
 //$this->ev_write($id, implode('', $data).$tag." OK FETCH completed\r\n");
 						foreach($data as $msg)
 						{
+//echo $msg."\n";
 							$this->ev_write($id, $msg);
 						}
 						$this->ev_write($id, $tag." OK FETCH completed\r\n");	

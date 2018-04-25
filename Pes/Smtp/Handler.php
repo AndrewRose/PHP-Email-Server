@@ -54,7 +54,11 @@ class Handler
 
 		$this->listener->setErrorCallback([$this, 'ev_lerror']);
 
-		$this->base->dispatch();
+		//while(1)
+		//{
+			$this->base->dispatch();
+		//	sleep(1);
+		//}
 	}
 
 	public function sigHandler($sig)
@@ -75,8 +79,9 @@ class Handler
 		}
 	}
 
-	public function ev_accept($listener, $fd, $address, $ctx)
+	public function ev_accept($listener, $fd=FALSE, $address=NULL, $args=NULL)
 	{
+		$this->log->write('ev_accept('.$id.')',3);
 		if(!$fd)
 		{
 			$this->log->write('ev_accept fd false?!', 3);
@@ -97,19 +102,27 @@ class Handler
 		];
 
 		$this->connections[$id]['cnxSsl'] = FALSE;
-		$this->connections[$id]['cnx'] = new \EventBufferEvent($this->base, $fd, \EventBufferEvent::OPT_CLOSE_ON_FREE);
 
-		if(!$this->connections[$id]['cnx'])
-		{
-			$this->log->write('ev_accept('.$id.'): Failed to create EventBufferEvent!',3);
-			$this->base->exit(NULL);
-			exit(1);
+		try {
+
+			$this->connections[$id]['cnx'] = new \EventBufferEvent($this->base, $fd, \EventBufferEvent::OPT_CLOSE_ON_FREE);
+
+			if(!$this->connections[$id]['cnx'])
+			{
+				$this->log->write('ev_accept('.$id.'): Failed to create EventBufferEvent!',3);
+				$this->base->exit(NULL);
+				exit(1);
+			}
+
+			$this->connections[$id]['cnx']->setCallbacks([$this, 'ev_read'], [$this, 'ev_write'], [$this, 'ev_event'], $id);
+			$this->connections[$id]['cnx']->enable(\Event::READ | \Event::WRITE);
+
+			$this->ev_write($id, '220 '.$this->domainName." wazzzap?\r\n");
 		}
-
-		$this->connections[$id]['cnx']->setCallbacks([$this, 'ev_read'], [$this, 'ev_write'], [$this, 'ev_event'], $id);
-		$this->connections[$id]['cnx']->enable(\Event::READ | \Event::WRITE);
-
-		$this->ev_write($id, '220 '.$this->domainName." wazzzap?\r\n");
+		catch(Exception $e)
+		{
+			$this->log->write('ev_accept('.$id.'): Failed to create new event! '.$e->getMessage(),3);
+		}
 	}
 
 	function ev_event($id, $event, $events)
@@ -144,25 +157,38 @@ $this->log->write('ev_lerror():',3);
 			$this->connections[$id]['cnx']->getInput()->read($this->connections[$id]['fd'], $this->maxRead);
 		}
 
-		if($this->connections[$id]['cnxSsl']) $this->connections[$id]['cnxSsl']->disable(\Event::READ | \Event::WRITE);
-		$this->connections[$id]['cnx']->disable(\Event::READ | \Event::WRITE);
-		if($this->connections[$id]['cnxSsl']) $this->connections[$id]['cnxSsl']->free();
-		$this->connections[$id]['cnx']->free();
+		try {
+			if($this->connections[$id]['cnxSsl']) $this->connections[$id]['cnxSsl']->disable(\Event::READ | \Event::WRITE);
+			$this->connections[$id]['cnx']->disable(\Event::READ | \Event::WRITE);
+			if($this->connections[$id]['cnxSsl']) $this->connections[$id]['cnxSsl']->free();
+			$this->connections[$id]['cnx']->free();
+		}
+		catch(Exception $e)
+		{
+			$this->log->write('ev_close('.$id.'): Failed to write to close! '.$e->getMessage(),3);
+		}
 		//unset($this->connections[$id]);
 	}
 
 	protected function ev_write($id, $string)
 	{
-		if($this->connections[$id]['cnxSsl'])
-		{
-			if(!$this->connections[$id]['cnxSsl']->write($string))
+		try {
+
+			if($this->connections[$id]['cnxSsl'])
 			{
-				$this->log->write('ev_write('.$id.'): Failed to write to client!',3);
+				if(!$this->connections[$id]['cnxSsl']->write($string))
+				{
+					$this->log->write('ev_write('.$id.'): Failed to write to client!',3);
+				}
+			}
+			else
+			{
+				$this->connections[$id]['cnx']->write($string);
 			}
 		}
-		else
+		catch(Exception $e)
 		{
-			$this->connections[$id]['cnx']->write($string);
+			$this->log->write('ev_write('.$id.'): Failed to write to client! '.$e->getMessage(),3);
 		}
 	}
 
@@ -318,10 +344,18 @@ $this->log->write('ev_lerror():',3);
 					$this->ev_write($id, "500 STARTTLS already called!\r\n");
 					return;
 				}
+
 				$this->ev_write($id, "220 Ready to start TLS\r\n");
-				$this->connections[$id]['cnxSsl'] = $this->connections[$id]['cnx']->sslFilter($this->base, $this->connections[$id]['cnx'], $this->ctx, \EventBufferEvent::SSL_ACCEPTING, \EventBufferEvent::OPT_CLOSE_ON_FREE);
-				$this->connections[$id]['cnxSsl']->setCallbacks([$this, 'ev_read'], [$this, 'ev_write'], [$this, 'ev_event'], $id);
-				$this->connections[$id]['cnxSsl']->enable(\Event::READ | \Event::WRITE);
+
+				try {
+					$this->connections[$id]['cnxSsl'] = $this->connections[$id]['cnx']->sslFilter($this->base, $this->connections[$id]['cnx'], $this->ctx, \EventBufferEvent::SSL_ACCEPTING, \EventBufferEvent::OPT_CLOSE_ON_FREE);
+					$this->connections[$id]['cnxSsl']->setCallbacks([$this, 'ev_read'], [$this, 'ev_write'], [$this, 'ev_event'], $id);
+					$this->connections[$id]['cnxSsl']->enable(\Event::READ | \Event::WRITE);
+				}
+				catch(Exception $e)
+				{
+					$this->log->write('STARTLS Failed! '.$e->getMessage(),3);
+				}
 			}
 			break;
 

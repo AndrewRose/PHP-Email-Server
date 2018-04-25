@@ -28,7 +28,7 @@ ignore_user_abort(true);
 if(DEBUG) xdebug_start_trace('imapd.trace');
 $settings = parse_ini_file(INICONF, TRUE);
 
-function __autoload($class)
+spl_autoload_register(function ($class)
 {
 	global $settings;
 	$file = $settings['autoLoader']['libPath'].str_replace('\\', '/', $class).'.php';
@@ -40,7 +40,7 @@ function __autoload($class)
 	{
 		throw new \Pes\Exception(1, $file);
 	}
-}
+});
 
 try
 {
@@ -48,5 +48,8 @@ try
 }
 catch(Exception $e)
 {
-	echo $e->getMessage()."\n";
+        ob_start();
+        echo 'Warp core breach: '.$e->getMessage()."\n";
+        if(DEBUG) xdebug_print_function_stack();
+        file_put_contents('/var/log/imapd.log.final', ob_get_clean());
 }
