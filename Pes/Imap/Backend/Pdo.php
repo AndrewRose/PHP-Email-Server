@@ -11,8 +11,11 @@ class Pdo implements \Pes\Imap\Interfaces\Backend
 	private $db = FALSE;
 	public $dbMaxPacketSize;
 
-	public function __construct($settings)
+	public function __construct($settings, $handler)
 	{
+		$this->handler = $handler;
+		$this->handler->log->write('Backend Pdo started');
+
 		// PHP hostname lookups can take a substantial amount of time to timeout.
 		if(!$this->ping($settings['hostname']))
 		{
@@ -24,10 +27,22 @@ class Pdo implements \Pes\Imap\Interfaces\Backend
 		$this->db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 
 		$this->dbMaxPacketSize = $this->db->query('select @@global.max_allowed_packet')->fetch(\PDO::FETCH_NUM)[0];
+
+		// Keep the DB connection alive by sending it a query every {keepalive} seconds..
+		// We do it this way as unable to catch connect timeouts as an exception as you might have seen below...
+		// no idea why we can't get a straight exception when a query fails .. and for why it failed :/
+		$db = $this->db;
+		$keepaliveEventTimer = \Event::timer($handler->base, function($keepalive) use (&$keepaliveEventTimer, $handler, $db) {
+			$db->query('select 1');
+			$handler->log->write('Ping DB', 3);
+			$keepaliveEventTimer->add($keepalive);
+		}, $settings['keepalive']);
+		$keepaliveEventTimer->addTimer($settings['keepalive']);
 	}
 
 	public function fetch($userId, $fetchParams, $uidMode=FALSE)
 	{
+//print_r($fetchParams);
 		// C(1): 80 FETCH 1:6 (FLAGS UID ENVELOPE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (CONTENT-TYPE)])
 		$query = 'SELECT ';
 		$queryParts = [];
@@ -39,6 +54,11 @@ class Pdo implements \Pes\Imap\Interfaces\Backend
 		{
 			$queryParts[] = 'a.id as UID';
 		}
+		else
+		{
+			$queryParts[] = 'a.id as UID';
+		}
+//$queryParts[] = 'length(b.body) as `RFC822.SIZE`';
 
 		$ret = [];
 		foreach($fetchParams as $item => $drop)
@@ -49,7 +69,7 @@ class Pdo implements \Pes\Imap\Interfaces\Backend
 				{
 					if(!$uidMode)
 					{
-						$queryParts[] = 'a.id as UID';
+					//	$queryParts[] = 'a.id as UID';
 					}
 				}
 				break;
@@ -169,7 +189,8 @@ class Pdo implements \Pes\Imap\Interfaces\Backend
 		}*/
 
 		$stmt = $this->db->prepare($query);
-
+//echo $query;
+//print_r($params);
 		if($stmt->execute($params))
 		{
 
@@ -229,7 +250,7 @@ $ii = 0;
 //echo "Fault\n";
 exit();
 									}
-
+//print_r($parts);
 									$headers = '';
 									foreach($fetchParams['BODY']['HEADER.FIELDS'] as $header)
 									{
@@ -245,7 +266,8 @@ exit();
 								}
 								else if(isset($fetchParams['BODY']['ALL']))
 								{
-									$tmp .= ($ii==0?'':' ').$fetchParams['BODY']['_CMD']. ' {'.strlen($row['BODY'])."}\r\n".$row['BODY'];
+$tmp .= ($ii==0?'':' ').$fetchParams['BODY']['_CMD']. ' {'.$row['RFC822.SIZE']."}\r\n".$row['BODY'];
+									//$tmp .= ($ii==0?'':' ').$fetchParams['BODY']['_CMD']. ' {'.strlen($row['BODY'])."}\r\n".$row['BODY'];
 								}
 							}
 						}
@@ -253,7 +275,8 @@ exit();
 
 						case 'RFC822':
 						{
-							$tmp .= ($ii==0?'':' ').'RFC822 {'.strlen($row['RFC822'])."}\r\n".$row['RFC822'];
+$tmp .= ($ii==0?'':' ').'RFC822 {'.$row['RFC822.SIZE']."}\r\n".$row['RFC822'];
+							//$tmp .= ($ii==0?'':' ').'RFC822 {'.strlen($row['RFC822'])."}\r\n".$row['RFC822'];
 						}
 						break;
 					}
